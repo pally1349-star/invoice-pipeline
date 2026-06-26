@@ -192,6 +192,8 @@ def process_file(service, file):
 
 
 def watch():
+    print(f"GROQ KEY LOADED: {GROQ_API_KEY[:10]}...")  # add this line
+    print("🚀 Invoice Pipeline Started")
     print("🚀 Invoice Pipeline Started")
     print(f"👀 Watching watch/ folder every {CHECK_INTERVAL} seconds...\n")
     service = get_drive_service()
