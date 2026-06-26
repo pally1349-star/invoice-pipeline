@@ -1,0 +1,7 @@
+cat > .gitignore << 'EOF'
+credentials.json
+venv/
+.DS_Store
+__pycache__/
+*.pyc
+EOF

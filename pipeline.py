@@ -11,15 +11,15 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
 
 # ─────────────────────────────────────────────
-# CONFIGURATION — fill these in
+# CONFIG — reads from environment variables
+# Set these in Railway dashboard → Variables
+# For local testing, set them in your terminal
 # ─────────────────────────────────────────────
-GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
-CREDENTIALS_FILE  = "credentials.json"
-SPREADSHEET_NAME  = "Inovice Data"
-WATCH_FOLDER_ID   = "1W-DeMNZZK232LTEzlJvSoQuz-2xG8xpH"
-DONE_FOLDER_ID    = "1082crwrANAkcEl2_TUQb0b7oH25gqyil"
+GROQ_API_KEY      = os.environ.get("GROQ_API_KEY", "")
+SPREADSHEET_NAME  = os.environ.get("SPREADSHEET_NAME", "Inovice Data")
+WATCH_FOLDER_ID   = os.environ.get("WATCH_FOLDER_ID", "1W-DeMNZZK232LTEzlJvSoQuz-2xG8xpH")
+DONE_FOLDER_ID    = os.environ.get("DONE_FOLDER_ID", "1082crwrANAkcEl2_TUQb0b7oH25gqyil")
 CHECK_INTERVAL    = 15
-# ─────────────────────────────────────────────
 
 SCOPES = [
     "https://www.googleapis.com/auth/drive",
@@ -28,7 +28,15 @@ SCOPES = [
 
 
 def get_credentials():
-    return Credentials.from_service_account_file(CREDENTIALS_FILE, scopes=SCOPES)
+    """Load Google credentials from env variable or local file."""
+    creds_env = os.environ.get("GOOGLE_CREDENTIALS")
+    if creds_env:
+        # Running on Railway — credentials stored as env variable
+        creds_dict = json.loads(creds_env)
+        return Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
+    else:
+        # Running locally — use credentials.json file
+        return Credentials.from_service_account_file("credentials.json", scopes=SCOPES)
 
 
 def get_drive_service():
@@ -64,19 +72,15 @@ def download_file(service, file_id, filename):
 
 
 def move_to_done(service, file_id):
-    """Move file from watch/ to done/ folder."""
-    # Get current parents
     file = service.files().get(fileId=file_id, fields="parents").execute()
     previous_parents = ",".join(file.get("parents", []))
-
-    # Move by adding done folder and removing watch folder
     service.files().update(
         fileId=file_id,
         addParents=DONE_FOLDER_ID,
         removeParents=previous_parents,
         fields="id, parents"
     ).execute()
-    print(f"  → Moved to done/")
+    print("  → Moved to done/")
 
 
 def file_to_base64_image(file_path):
@@ -144,6 +148,7 @@ def push_to_sheets(data, filename):
     except gspread.SpreadsheetNotFound:
         print(f"  ERROR: Sheet '{SPREADSHEET_NAME}' not found.")
         return
+
     if sheet.row_count == 0 or sheet.acell("A1").value is None:
         headers = [
             "File Name", "Invoice Number", "Invoice Date",
@@ -151,6 +156,7 @@ def push_to_sheets(data, filename):
             "Subtotal", "Tax", "Total Amount", "Currency", "Payment Terms"
         ]
         sheet.append_row(headers)
+
     row = [
         filename,
         data.get("invoice_number", ""),
@@ -165,29 +171,23 @@ def push_to_sheets(data, filename):
         data.get("payment_terms", ""),
     ]
     sheet.append_row(row)
-    print(f"  ✅ Data pushed to Google Sheet")
+    print("  ✅ Data pushed to Google Sheet")
 
 
 def process_file(service, file):
     print(f"\n📄 New file: {file['name']}")
-
     print("  → Downloading...")
     local_path = download_file(service, file["id"], file["name"])
-
     print("  → Converting to image...")
     b64 = file_to_base64_image(local_path)
-
     print("  → Sending to Groq AI...")
     data = extract_invoice_data(b64)
     print(f"  → Extracted: {json.dumps(data, indent=2)}")
-
     print("  → Pushing to Google Sheets...")
     push_to_sheets(data, file["name"])
-
     print("  → Moving to done/...")
     move_to_done(service, file["id"])
-
-    os.unlink(local_path)  # delete temp file
+    os.unlink(local_path)
     print(f"  ✅ Done: {file['name']}")
 
 
@@ -206,12 +206,11 @@ def watch():
                         process_file(service, file)
                         processed.add(file["id"])
                     except Exception as e:
-                        print(f"  ❌ Error processing {file['name']}: {e}")
+                        print(f"  ❌ Error: {e}")
             else:
                 print(".", end="", flush=True)
         except Exception as e:
             print(f"\n⚠️  Connection error: {e}. Retrying...")
-
         time.sleep(CHECK_INTERVAL)
 
 
